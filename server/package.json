@@ -1,0 +1,37 @@
+{
+  "name": "mentor-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch server.js",
+    "start": "node server.js",
+    "test": "node --test --test-concurrency=1",
+    "db:reset": "node src/db/reset.js",
+    "db:seed": "node src/db/seed.js",
+    "format": "prettier --write \"src/**/*.js\" \"tests/**/*.js\"",
+    "format:check": "prettier --check \"src/**/*.js\" \"tests/**/*.js\""
+  },
+  "dependencies": {
+    "@payos/node": "^1.0.10",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^18.0.8",
+    "express": "^4.21.2",
+    "google-auth-library": "^11.3.4",
+    "jsonwebtoken": "^9.0.3",
+    "mysql2": "^3.24.5",
+    "node-cron": "^4.6.0",
+    "nodemailer": "^10.5.0",
+    "resend": "^6.38.0",
+    "socket.io": "^4.8.4",
+    "uploadthing": "^7.7.4"
+  },
+  "engines": {
+    "node": ">=20.12"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.10"
+  }
+}

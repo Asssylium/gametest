@@ -1,0 +1,111 @@
+// ==========================================
+// GAME AGENCY SYSTEM - DATABASE SCHEMA (DBML)
+// ==========================================
+
+Table roles {
+  id integer [primary key]
+  code varchar [unique, not null, note: 'admin, operator, player']
+  name varchar [not null]
+  created_at timestamp
+}
+
+Table users {
+  id integer [primary key]
+  username varchar [unique, not null]
+  password varchar [not null]
+  role_id integer [not null, note: 'Khóa ngoại trỏ tới bảng roles']
+  balance decimal(15,2) [not null, default: 0.00, note: 'Số dư chính xác tới từng xu']
+  is_active boolean [not null, default: true, note: 'Trạng thái hoạt động của tài khoản']
+  last_login_at timestamp
+  parent_id integer [note: 'Tài khoản cấp trên (Admin tạo Operator, Operator tạo Player)']
+  created_at timestamp
+}
+
+Table vendors {
+  id integer [primary key]
+  code varchar [unique, not null, note: 'Mã viết tắt không trùng: PP, HS']
+  name varchar [not null]
+  logo varchar
+  type varchar [not null, note: 'Slot hoặc Live casino']
+  sort_order integer [not null, default: 0]
+  is_active boolean [not null, default: true, note: 'Bật/tắt toàn bộ nhà cung cấp khi bảo trì']
+  created_at timestamp
+}
+
+Table games {
+  id integer [primary key]
+  vendor_id integer [not null]
+  game_code varchar [not null, note: 'Mã game không trùng trong cùng nhà cung cấp']
+  title varchar [not null, note: 'Tên tiếng Anh']
+  title_jp varchar [note: 'Tên tiếng Nhật']
+  image varchar
+  sort_order integer [not null, default: 0]
+  is_active boolean [not null, default: true]
+  created_at timestamp
+  
+  indexes {
+    (vendor_id, game_code) [unique]
+  }
+}
+
+Table operator_vendors {
+  id integer [primary key]
+  operator_id integer [not null]
+  vendor_id integer [not null]
+  bet_limit decimal(15,2) [not null, default: 0.00, note: 'Hạn mức cược riêng cho từng nhà cung cấp']
+  is_active boolean [not null, default: true]
+  
+  indexes {
+    (operator_id, vendor_id) [unique]
+  }
+}
+
+Table operator_games {
+  id integer [primary key]
+  operator_id integer [not null]
+  game_id integer [not null]
+  is_active boolean [not null, default: true, note: 'Operator bật/tắt game cho người chơi']
+  
+  indexes {
+    (operator_id, game_id) [unique]
+  }
+}
+
+Table bets {
+  id integer [primary key]
+  user_id integer [not null, note: 'Người chơi (Player)']
+  game_id integer [not null, note: 'Trò chơi tham gia']
+  provider_tx_id varchar [unique, not null, note: 'Mã giao dịch riêng từ nhà cung cấp chống gọi lặp (Idempotency)']
+  type varchar [not null, note: 'Loại giao dịch: BET, WIN, REFUND']
+  amount decimal(15,2) [not null, note: 'Số tiền cược hoặc thắng']
+  balance_before decimal(15,2) [not null, note: 'Số dư trước giao dịch']
+  balance_after decimal(15,2) [not null, note: 'Số dư sau giao dịch']
+  parent_bet_id integer [note: 'Liên kết lần thắng thuộc lần cược nào (Self-referencing)']
+  created_at timestamp
+}
+
+// ==========================================
+// RELATIONSHIPS (QUAN HỆ GIỮA CÁC BẢNG)
+// ==========================================
+
+// 1. Phân quyền và Người dùng (1 - N)
+Ref: users.role_id > roles.id
+
+// 2. Phân cấp tài khoản tự tham chiếu (Self-referencing)
+Ref: users.parent_id > users.id
+
+// 3. Nhà cung cấp và Game (1 - N)
+Ref: games.vendor_id > vendors.id
+
+// 4. Operator và Vendor (Bảng trung gian N - N)
+Ref: operator_vendors.operator_id > users.id
+Ref: operator_vendors.vendor_id > vendors.id
+
+// 5. Operator và Game (Bảng trung gian N - N)
+Ref: operator_games.operator_id > users.id
+Ref: operator_games.game_id > games.id
+
+// 6. Lịch sử cược / Giao dịch (Bets & Transactions)
+Ref: bets.user_id > users.id
+Ref: bets.game_id > games.id
+Ref: bets.parent_bet_id > bets.id
