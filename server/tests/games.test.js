@@ -1,33 +1,48 @@
 import { test, describe, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
-import { config } from '../src/config.js';
-import { createPool, resetDatabase } from '../src/db/database.js';
-import { createGameRepository } from '../src/repositories/gameRepository.js';
-import { createVendorRepository } from '../src/repositories/vendorRepository.js';
-import { createAccountRepository } from '../src/repositories/accountRepository.js';
+import { connectMongo, seedMongoCatalog } from '../src/db/mongoDatabase.js';
+import { createMongoGameRepository } from '../src/repositories/mongoGameRepository.js';
+import {
+  createMongoVendorRepository,
+  createMongoAccountRepository,
+  createMongoOtpRepository,
+} from '../src/repositories/mongoRepositories.js';
 
 process.env.NODE_ENV = 'test';
 
-// Tests run against the separate test database, reset to seed data before each test.
-let pool;
+try {
+  process.loadEnvFile(new URL('../.env', import.meta.url));
+} catch (error) {
+  if (error.code !== 'ENOENT') throw error;
+}
+let db;
+let mongoClient;
 let server;
 let baseUrl;
 
-before(() => {
-  pool = createPool({ database: config.testDatabase });
+before(async () => {
+  const name = `mentor_game_test_${process.pid}_${Date.now()}`;
+  ({ db, client: mongoClient } = await connectMongo(process.env.MONGODB_URI, name));
 });
 
-after(() => pool.end());
+after(async () => {
+  if (db) await db.dropDatabase();
+  if (mongoClient) await mongoClient.close();
+});
 
 beforeEach(async () => {
-  await resetDatabase(pool);
+  await Promise.all(['games', 'vendors', 'counters'].map((name) => db.collection(name).deleteMany({})));
+  await seedMongoCatalog(db);
 
   // Khởi tạo app với đầy đủ 3 mock repositories
   server = createApp({
-    gameRepository: createGameRepository({ pool }),
-    vendorRepository: createVendorRepository({ pool }),
-    accountRepository: createAccountRepository(pool),
+    db,
+    mongoClient,
+    gameRepository: createMongoGameRepository(db),
+    vendorRepository: createMongoVendorRepository(db),
+    accountRepository: createMongoAccountRepository(db),
+    otpRepository: createMongoOtpRepository(db),
   }).listen(0);
 
   await new Promise((resolve) => server.once('listening', resolve));
@@ -123,9 +138,9 @@ describe('GET /api/games/:id', () => {
     assert.equal(status, 404);
   });
 
-  test('returns 500 for an invalid id', async () => {
+  test('returns 400 for an invalid id', async () => {
     const { status } = await api('/api/games/abc');
-    assert.equal(status, 500);
+    assert.equal(status, 400);
   });
 });
 

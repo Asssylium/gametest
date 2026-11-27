@@ -26,7 +26,7 @@ import { useSocket } from '../../context/SocketContext.jsx';
 
 export default function MessengerWidget() {
   const { user } = useAuth();
-  const { socket } = useSocket();
+  const { socket, polling } = useSocket();
 
   const [openBox, setOpenBox] = useState(false);
   const [minimized, setMinimized] = useState(false);
@@ -98,6 +98,24 @@ export default function MessengerWidget() {
     socket.on('dm:receive', handleReceive);
     return () => socket.off('dm:receive', handleReceive);
   }, [socket, myId, activeUser, openBox, minimized, loadPartners]);
+
+  useEffect(() => {
+    if (!polling || !myId) return;
+    let active = true;
+    const interval = window.setInterval(async () => {
+      await loadPartners();
+      if (!activeUser || !openBox || minimized) return;
+      try {
+        const history = await api.getMessagesWith(activeUser.id);
+        if (!active) return;
+        setMessages(Array.isArray(history) ? history : []);
+        await api.markConversationRead(activeUser.id);
+      } catch (error) {
+        console.error('Refresh conversation error:', error);
+      }
+    }, 10000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [polling, myId, activeUser, openBox, minimized, loadPartners]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });

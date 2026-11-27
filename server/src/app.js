@@ -24,26 +24,23 @@ import { createEmailRoutes } from './routes/email.js';
 import { createEmailService } from './services/emailService.js';
 import { createOtpRepository } from './repositories/otpRepository.js';
 
-import { createTransactionService } from './services/transactionService.js';
+import { createMongoTransactionService, createMongoPaymentService } from './services/mongoWalletService.js';
 import { createTransactionController } from './controllers/transactionController.js';
 import { createTransactionRoutes } from './routes/transactions.js';
 
-import { createDashboardService } from './services/dashboardService.js';
+import { createMongoDashboardService } from './services/mongoDashboardService.js';
 import { createDashboardController } from './controllers/dashboardController.js';
 import { createDashboardRoutes } from './routes/dashboard.js';
 
-import { createPaymentService } from './services/paymentService.js';
 import { createPaymentController } from './controllers/paymentController.js';
 import { createPaymentRoutes } from './routes/payments.js';
 
-import { createContactService } from './services/contactService.js';
+import { createMongoContactService } from './services/mongoContactService.js';
 import { createContactController } from './controllers/contactController.js';
 import { createContactRoutes } from './routes/contacts.js';
 
-import { createIdempotencyRepository } from './repositories/idempotencyRepository.js';
-import { createIdempotencyMiddleware } from './middlewares/idempotency.js';
+import { createMongoMessageRepository } from './repositories/mongoRepositories.js';
 
-import { createMessageRepository } from './repositories/messageRepository.js';
 import { createMessageService } from './services/messageService.js';
 import { createMessageController } from './controllers/messageController.js';
 import { createMessageRoutes } from './routes/messages.js';
@@ -52,12 +49,14 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 export function createApp({
-  pool,
+  db,
+  mongoClient,
   gameRepository,
   vendorRepository,
   accountRepository,
   otpRepository,
   emailController,
+  runEmailJob,
 }) {
   const app = express();
 
@@ -84,26 +83,23 @@ export function createApp({
   const __dirname = path.dirname(__filename);
   const clientDistPath = path.resolve(__dirname, '../../client/dist');
 
-  const transactionService = createTransactionService(pool);
+  const transactionService = createMongoTransactionService(db, mongoClient);
   const transactionController = createTransactionController(transactionService);
   const transactionRoutes = createTransactionRoutes(transactionController);
 
-  const dashboardService = createDashboardService(pool);
+  const dashboardService = createMongoDashboardService(db);
   const dashboardController = createDashboardController(dashboardService);
   const dashboardRoutes = createDashboardRoutes(dashboardController);
 
-  const idempotencyRepository = createIdempotencyRepository(pool);
-  const idempotencyMiddleware = createIdempotencyMiddleware(idempotencyRepository);
-
-  const paymentService = createPaymentService(pool);
+  const paymentService = createMongoPaymentService(db, mongoClient);
   const paymentController = createPaymentController(paymentService);
   const paymentRoutes = createPaymentRoutes(paymentController);
 
-  const contactService = createContactService(pool, emailService);
+  const contactService = createMongoContactService(db, emailService);
   const contactController = createContactController(contactService);
   app.use('/api/contact', createContactRoutes(contactController));
 
-  const messageRepository = createMessageRepository(pool);
+  const messageRepository = createMongoMessageRepository(db);
   const messageService = createMessageService(messageRepository);
   const messageController = createMessageController(messageService);
   app.use('/api/messages', createMessageRoutes(messageController));
@@ -112,6 +108,20 @@ export function createApp({
   app.use(express.static(clientDistPath));
 
   app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+  if (runEmailJob) {
+    app.get('/api/cron/email', async (req, res, next) => {
+      if (!process.env.CRON_SECRET || req.get('Authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
+        return res.status(401).json({ message: 'Unauthorized' });
+      }
+      try {
+        await runEmailJob();
+        return res.json({ status: 'ok' });
+      } catch (error) {
+        return next(error);
+      }
+    });
+  }
 
   app.use('/api/games', createGameRoutes(gameController));
   app.use('/api/vendors', createVendorRoutes(vendorController));

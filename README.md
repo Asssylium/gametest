@@ -3,34 +3,30 @@
 Project mẫu để mentor intern: **Node.js (Express) API** + **React (Vite) frontend**.
 Nghiệp vụ là một catalog game thu nhỏ (vendor, game, bật/tắt, sắp xếp, tên tiếng Nhật), gần với dự án thật GamesPlatform để intern dễ chuyển sang sau này.
 
-Database: **MySQL** (database `mentor_game`), kết nối qua thư viện `mysql2`. Test chạy trên database riêng `mentor_game_test`, bị reset trước mỗi test.
+Database: **MongoDB Atlas** (database `mentor_game` by default). Existing MySQL data is not migrated or deleted.
 
 ## Yêu cầu
 
-- Node.js >= 20 (`node -v`)
-- MySQL 8 đang chạy ở `127.0.0.1:3306`
+- Node.js >= 20.12 (`node -v`)
+- MongoDB Atlas cluster with the server IP allowed in Network Access
 
 ## Tạo database (làm 1 lần)
 
-Dùng chung MySQL và user với GamesPlatform_Backend (user `huonght`, không mật khẩu).
+Copy `server/.env.example` to `server/.env` and set `MONGODB_URI` to your Atlas connection string.
+Set `MONGODB_DATABASE` to choose a database (defaults to `mentor_game`). Keep credentials private.
+The API initializes indexes and seeds missing sample vendors and games at startup without deleting existing data.
+Set a long random `JWT_SECRET` for protected routes. Email verification requires `SMTP_USER`, `SMTP_PASS`, and
+`EMAIL_USER`; real payments require the `PAYOS_*` credentials. No sample user accounts are created.
 
 ```bash
 cd server
 npm install
-cp .env.example .env          # cấu hình DB, cùng key DB_* như bên Laravel
-
-# Tạo database mentor_game và mentor_game_test
-mysql -uhuonght -h127.0.0.1 < db/setup.sql
-
-# Tạo bảng + nạp dữ liệu mẫu (chạy lại bất cứ lúc nào để về dữ liệu gốc)
-npm run db:reset
+npm run db:mongo:init       # optional: initialize collections and indexes
+npm run db:seed             # optional: add missing sample data
 ```
 
-| Host      | Port | User    | Password | Database    |
-| --------- | ---- | ------- | -------- | ----------- |
-| 127.0.0.1 | 3306 | huonght | (trống)  | mentor_game |
-
-**Kết nối bằng MySQL Workbench:** dùng luôn connection đang mở DB của GamesPlatform (hoặc tạo mới: Hostname `127.0.0.1`, Port `3306`, Username `huonght`, không mật khẩu), rồi chọn schema `mentor_game` để xem bảng `vendors` và `games` (bấm Refresh nếu chưa thấy).
+The initializer can update validators on existing collections. Wallet operations require MongoDB transactions,
+available on Atlas clusters. `npm run db:reset` is disabled to protect existing data.
 
 ## Chạy project
 
@@ -58,26 +54,41 @@ cd server
 npm test
 ```
 
+Tests require `MONGODB_URI` and permission to create and drop uniquely named temporary databases.
+They never reset the configured application database.
+
+## Deploy on Vercel
+
+1. Push the repository to GitHub without committing `.env` files, then import it in Vercel with the repository root as the project root.
+2. Select Node.js 22 or newer and use the build and output settings in `vercel.json`.
+3. Add `MONGODB_URI`, `MONGODB_DATABASE`, `JWT_SECRET`, and `CRON_SECRET` in Vercel's environment settings. Use long random secrets, and never expose them as `VITE_` variables.
+4. Initialize the Atlas schema and sample data once with `npm run db:seed` from `server/`, using the same database. Vercel does not seed on each function start.
+5. Allow Vercel's outbound connections in Atlas Network Access. Vercel's outbound IPs are dynamic unless its paid Static IP feature is enabled. Allowing `0.0.0.0/0` exposes the database to the internet; use strong credentials and limit privileges if doing this for a demo.
+6. Deploy and check `/api/health`. Add `CLIENT_URL` as the deployed URL for PayOS return links. Configure SMTP, PayOS, UploadThing and Google credentials if those features are needed; the Google browser client ID is `VITE_GOOGLE_CLIENT_ID`.
+
+On Vercel, chat and inbox updates poll every 10 seconds instead of using Socket.IO. The configured Vercel cron runs once per day to support Hobby accounts, so scheduled email may be delayed by more than a day; a Pro plan and a more frequent cron schedule are needed for minute-level delivery. Set `CRON_SECRET` or scheduled processing will be rejected. If a function stops after claiming an email, that email remains `PROCESSING` and requires manual review; SMTP delivery cannot be guaranteed exactly once. Cron runs only on production deployments.
+
+The Vercel deployment is intended for demonstration, not real-money transactions. Before publishing, rotate any credentials previously shared in chat.
+
 ## Cấu trúc
 
 ```
 server/
   src/
-    index.js              # khởi động server
+    ../server.js          # khởi động server
     app.js                # tạo Express app, nối các tầng với nhau
     config.js             # cấu hình (đọc server/.env: port, kết nối DB)
-    db/database.js        # tạo connection pool, reset bảng + seed
-    db/reset.js           # lệnh npm run db:reset
+    db/mongoDatabase.js   # MongoDB connection, numeric IDs and sample seeding
+    db/mongoSchema.js     # collection validators and indexes
     routes/               # khai báo URL -> hàm controller
     controllers/          # đọc request, gọi service, trả response
     services/             # nghiệp vụ: lọc, phân trang, validate
-    repositories/         # truy cập dữ liệu (query MySQL)
+    repositories/         # truy cập dữ liệu MongoDB
     middlewares/          # log request, xử lý lỗi chung
     utils/                # httpError (lỗi kèm HTTP status), validation, asyncHandler
     data/seed.js          # dữ liệu mẫu
   .env.example            # mẫu cấu hình DB (copy thành .env)
-  db/setup.sql            # tạo database
-  db/schema.sql           # định nghĩa bảng
+  db/schema.sql           # legacy MySQL schema (not used by the API)
   tests/                  # test API + DB bằng node:test
 
 client/
@@ -112,10 +123,11 @@ Quy tắc chia tầng (giống Repository/Controller bên Laravel):
 
 | Bảng      | Cột chính                                                                                                                                                                                      |
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vendors` | `code` (PK), `name`                                                                                                                                                                            |
-| `games`   | `id` (PK, autoincrement), `vendor_code` (FK → vendors), `game_code`, `title`, `title_jp`, `type` (SLOT/LIVE/TABLE), `active` (0/1), `sort`, `created_at` – unique (`vendor_code`, `game_code`) |
+| `vendors` | `id`, `code` (unique), `name` |
+| `games`   | `id`, `vendor_id`, `game_code`, `title`, `title_jp`, `type`, `is_active`, `sort_order`, `created_at`; unique (`vendor_id`, `game_code`) |
 
-Định nghĩa đầy đủ ở `server/db/schema.sql`.
+Collection validators and indexes are defined in `server/src/db/mongoSchema.js`. References use numeric IDs;
+MongoDB does not enforce foreign keys. Balance changes use MongoDB transactions.
 
 ## API
 
@@ -226,26 +238,17 @@ if (!GAME_TYPES.includes(input.type)) errors.type = 'Type must be one of ...';
 assertValid(errors); // 400 { message, errors: { title, type } }
 ```
 
-**Database (MySQL)**
+**Database (MongoDB)**
 
-- **Luôn dùng tham số `?`**, không bao giờ nối chuỗi giá trị người dùng vào SQL (chống SQL injection).
-- Tên cột / chiều sắp xếp lấy từ người dùng phải đi qua whitelist (xem `SORTABLE_COLUMNS`).
-- Lọc, sắp xếp, phân trang làm trong SQL (`WHERE`, `ORDER BY`, `LIMIT`), không lấy hết bảng lên rồi lọc bằng JS.
-- Chỉ `SELECT` các cột cần dùng, không `SELECT *`.
-- Thay đổi cấu trúc bảng thì sửa `db/schema.sql`, cập nhật dữ liệu mẫu trong `data/seed.js` nếu cần, rồi chạy `npm run db:reset`.
-- Các query độc lập với nhau thì chạy song song bằng `Promise.all`.
-
-```js
-// ✅
-pool.query('SELECT ... FROM games WHERE vendor_code = ?', [vendorCode]);
-// ❌ SQL injection
-pool.query(`SELECT ... FROM games WHERE vendor_code = '${vendorCode}'`);
-```
+- Use structured MongoDB filters and whitelist sortable fields.
+- Perform filtering, sorting and pagination in MongoDB.
+- Update `src/db/mongoSchema.js` when collection validators or indexes change.
+- Use sessions and transactions when multiple documents must change atomically.
 
 **Test**
 
 - API mới hoặc thay đổi hành vi phải có test trong `server/tests/`: ít nhất 1 trường hợp thành công và 1 trường hợp lỗi (400/404/409).
-- Test chạy trên DB `mentor_game_test`, được reset trước mỗi test. Không viết test phụ thuộc thứ tự chạy hay dữ liệu do test khác tạo ra.
+- Tests create and delete their own temporary MongoDB databases. Không viết test phụ thuộc thứ tự chạy hay dữ liệu do test khác tạo ra.
 
 ### React (client)
 
@@ -301,7 +304,7 @@ export default function GameTable({ games, vendors, loading, onUpdate }) { ... }
   - [ ] `npm run format:check` pass ở cả `server/` và `client/`
   - [ ] Tự test lại trên trình duyệt, kể cả trường hợp lỗi
   - [ ] Không còn `console.log` debug, code comment-out
-  - [ ] Cập nhật `.env.example`, `schema.sql`, README nếu có thay đổi liên quan
+  - [ ] Cập nhật `.env.example`, MongoDB schema, README nếu có thay đổi liên quan
 
 ## Bài tập cho intern
 

@@ -1,34 +1,30 @@
 import cron from 'node-cron';
 
-export function startEmailCronJob(emailRepository, pool, emailService) {
-  cron.schedule('* * * * *', async () => {
+export function startEmailCronJob(emailRepository, db, emailService) {
+  return cron.schedule('* * * * *', () => runScheduledEmails(emailRepository, db, emailService));
+}
+
+export async function runScheduledEmails(emailRepository, db, emailService) {
     try {
-      const dateObj = new Date();
-      const yyyy = dateObj.getFullYear();
-      const MM = String(dateObj.getMonth() + 1).padStart(2, '0');
-      const dd = String(dateObj.getDate()).padStart(2, '0');
-      const hh = String(dateObj.getHours()).padStart(2, '0');
-      const mm = String(dateObj.getMinutes()).padStart(2, '0');
-
-      const nowString = `${yyyy}-${MM}-${dd}T${hh}:${mm}`;
-
-      const pendingEmails = await emailRepository.getPendingEmails(nowString);
+      const pendingEmails = await emailRepository.getPendingEmails(new Date());
 
       if (pendingEmails.length > 0) {
         console.log(`[CronJob] Tìm thấy ${pendingEmails.length} email đến hạn gửi.`);
       }
 
       for (const email of pendingEmails) {
+        if (!(await emailRepository.claimPending(email.id))) continue;
         try {
           let targets = [];
           try {
             targets = JSON.parse(email.target_role);
           } catch (e) {
             console.error(`[CronJob] Lỗi parse JSON target_role của email ID ${email.id}`);
+            await emailRepository.updateStatus(email.id, 'FAILED');
             continue;
           }
 
-          const bccList = await resolveEmailsFromTargets(pool, targets);
+          const bccList = await resolveEmailsFromTargets(db, targets);
 
           if (bccList.length === 0) {
             console.log(`[CronJob] Email ID ${email.id} không có người nhận hợp lệ. Đánh dấu FAILED.`);
@@ -52,16 +48,19 @@ export function startEmailCronJob(emailRepository, pool, emailService) {
       }
     } catch (error) {
       console.error('[CronJob] Lỗi hệ thống CronJob:', error);
+      throw error;
     }
-  });
 }
 
-async function resolveEmailsFromTargets(pool, targets) {
+export async function resolveEmailsFromTargets(db, targets) {
   if (!targets || targets.length === 0) return [];
 
   const hasAll = targets.some((t) => t.type === 'ALL');
   if (hasAll) {
-    const [rows] = await pool.query('SELECT email FROM accounts WHERE is_active = 1');
+    const rows = await db
+      .collection('accounts')
+      .find({ is_active: 1 }, { projection: { email: 1 } })
+      .toArray();
     return rows.map((r) => r.email);
   }
 
@@ -69,19 +68,25 @@ async function resolveEmailsFromTargets(pool, targets) {
   const userIds = [];
 
   for (const t of targets) {
-    if (t.type === 'ROLE' && t.value) roleIds.push(t.value);
-    if (t.type === 'USER' && t.id) userIds.push(t.id);
+    if (t.type === 'ROLE' && t.value) roleIds.push(Number(t.value));
+    if (t.type === 'USER' && t.id) userIds.push(Number(t.id));
   }
 
   let finalEmails = new Set();
 
   if (roleIds.length > 0) {
-    const [roleRows] = await pool.query(`SELECT email FROM accounts WHERE is_active = 1 AND role_id IN (?)`, [roleIds]);
+    const roleRows = await db
+      .collection('accounts')
+      .find({ is_active: 1, role_id: { $in: roleIds } })
+      .toArray();
     roleRows.forEach((r) => finalEmails.add(r.email));
   }
 
   if (userIds.length > 0) {
-    const [userRows] = await pool.query(`SELECT email FROM accounts WHERE is_active = 1 AND id IN (?)`, [userIds]);
+    const userRows = await db
+      .collection('accounts')
+      .find({ is_active: 1, id: { $in: userIds } })
+      .toArray();
     userRows.forEach((r) => finalEmails.add(r.email));
   }
 

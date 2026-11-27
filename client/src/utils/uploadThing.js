@@ -1,13 +1,15 @@
 import { generateUploadButton, generateUploadDropzone, generateReactHelpers } from '@uploadthing/react';
 
+const uploadUrl = `${window.location.origin}/api/uploadthing`;
+
 export const UploadButton = generateUploadButton({
-  url: 'http://localhost:3001/api/uploadthing',
+  url: uploadUrl,
 });
 
 export const UploadDropzone = generateUploadDropzone({
-  url: 'http://localhost:3001/api/uploadthing',
+  url: uploadUrl,
 });
 
 export const { uploadFiles } = generateReactHelpers({
-  url: 'http://localhost:3001/api/uploadthing',
+  url: uploadUrl,
 });

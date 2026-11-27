@@ -6,3 +6,5 @@ client/dist/
 .env.*
 !.env.example
 *.log
+.vercel
+.env*

@@ -22,7 +22,7 @@ import { useSocket } from '../../context/SocketContext.jsx';
 import Notice from '../../components/common/Notice.jsx';
 
 export default function AdminInboxPage() {
-  const { socket, setUnreadCount } = useSocket();
+  const { socket, setUnreadCount, polling } = useSocket();
 
   const [messages, setMessages] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -31,8 +31,8 @@ export default function AdminInboxPage() {
   const [sendingReply, setSendingReply] = useState(false);
   const [notice, setNotice] = useState(null);
 
-  const loadMessages = useCallback(async () => {
-    setLoading(true);
+  const loadMessages = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     try {
       const data = await api.getContactMessages();
       const list = Array.isArray(data?.messages) ? data.messages : [];
@@ -51,6 +51,12 @@ export default function AdminInboxPage() {
   useEffect(() => {
     loadMessages();
   }, []);
+
+  useEffect(() => {
+    if (!polling) return;
+    const interval = window.setInterval(() => loadMessages(true), 10000);
+    return () => window.clearInterval(interval);
+  }, [polling, loadMessages]);
 
   // Lắng nghe tin nhắn mới real-time qua Socket.IO
   useEffect(() => {
@@ -111,13 +117,13 @@ export default function AdminInboxPage() {
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box>
           <Typography variant="h4" fontWeight="bold">
-            Hộp thư liên hệ (Real-time)
+            Hộp thư liên hệ
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Tự động nhận tin nhắn mới qua Socket.IO và phản hồi trực tiếp qua email
+            {polling ? 'Tin nhắn mới được cập nhật định kỳ' : 'Tự động nhận tin nhắn mới qua Socket.IO'}
           </Typography>
         </Box>
-        <Button variant="outlined" startIcon={<RefreshIcon />} onClick={loadMessages} disabled={loading}>
+        <Button variant="outlined" startIcon={<RefreshIcon />} onClick={() => loadMessages()} disabled={loading}>
           Làm mới
         </Button>
       </Box>

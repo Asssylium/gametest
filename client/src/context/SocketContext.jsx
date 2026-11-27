@@ -6,6 +6,7 @@ import { api } from '../api/client.js';
 const SocketContext = createContext(null);
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
+const polling = import.meta.env.VITE_REALTIME_MODE === 'polling';
 
 export function SocketProvider({ children }) {
   const { user } = useAuth();
@@ -39,6 +40,11 @@ export function SocketProvider({ children }) {
 
     refreshUnreadCount();
 
+    if (polling) {
+      const interval = window.setInterval(refreshUnreadCount, 10000);
+      return () => window.clearInterval(interval);
+    }
+
     const instance = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket', 'polling'],
@@ -65,6 +71,7 @@ export function SocketProvider({ children }) {
         setUnreadCount,
         latestMessage,
         refreshUnreadCount,
+        polling,
       }}
     >
       {children}
